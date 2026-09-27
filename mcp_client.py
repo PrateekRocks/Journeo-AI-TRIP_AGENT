@@ -6,7 +6,7 @@ from typing import Any
 
 import certifi
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 
@@ -29,7 +29,7 @@ AVIATION_STACK_API_KEY = (
 )
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp_server.py"
 UVX_COMMAND = shutil.which("uvx") or "uvx"
@@ -65,9 +65,12 @@ def _subprocess_env(**updates: str | None) -> dict[str, str]:
 # LLM
 # =========================================================
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=_require_env("GROQ_API_KEY", GROQ_API_KEY),
+selected_model = os.getenv("GOOGLE_MODEL", "gemini-3.6-flash")
+llm = ChatGoogleGenerativeAI(
+    model=selected_model,
+    temperature=0,
+    streaming=True,
+    api_key=_require_env("GOOGLE_API_KEY", GOOGLE_API_KEY),
 )
 
 
@@ -253,14 +256,37 @@ async def aviation_mcp_call(
     tool_name: str,
     tool_args: dict[str, Any] | None = None,
 ):
-    aviation_tool = await _get_server_tool(
-        "aviationstack",
-        tool_name,
-    )
+    try:
+        aviation_tool = await _get_server_tool(
+            "aviationstack",
+            tool_name,
+        )
 
-    return await aviation_tool.ainvoke(
-        tool_args or {}
-    )
+        return await aviation_tool.ainvoke(
+            tool_args or {}
+        )
+    except Exception as exc:
+        print(
+            f"AviationStack MCP error: {exc}. "
+            "Mounting flight_tool.py as alternative fallback.",
+            flush=True,
+        )
+
+        from tools.flight_tool import search_flights
+
+        class FallbackTool:
+            def __init__(self, name: str):
+                self.name = name
+
+            async def ainvoke(self, args: dict):
+                query = args.get("query", "popular live flights")
+                try:
+                    return search_flights(query)
+                except Exception as e:
+                    return f"Fallback flight tool error: {e}"
+
+        fallback = FallbackTool(tool_name)
+        return await fallback.ainvoke(tool_args or {})
 
 
 # =========================================================

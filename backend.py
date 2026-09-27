@@ -14,7 +14,7 @@ import json
 import psycopg
 from psycopg.rows import dict_row
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres import PostgresSaver\nfrom psycopg_pool import ConnectionPool
 from langgraph.types import Command, interrupt
 from langchain_core.messages import (
     AnyMessage,
@@ -22,7 +22,7 @@ from langchain_core.messages import (
     AIMessage,
     SystemMessage,
 )
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 from mcp_client import (
@@ -35,7 +35,7 @@ from mcp_client import (
 
 
 def get_database_url():
-    database_url = os.getenv("DATABASE_URL")
+    database_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
 
     if not database_url:
         raise ValueError(
@@ -43,24 +43,28 @@ def get_database_url():
             "Please add your Render PostgreSQL External Database URL to .env"
         )
 
-    if "sslmode=" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        database_url = f"{database_url}{separator}sslmode=require"
+    if "localhost" not in database_url and "127.0.0.1" not in database_url:
+        if "sslmode=" not in database_url:
+            separator = "&" if "?" in database_url else "?"
+            database_url = f"{database_url}{separator}sslmode=require"
 
     return database_url
 
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is missing. Please add it to your .env file.")
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY is missing. Please add it to your .env file.")
 
 # =========================
-# LLM - original model kept
+# LLM
 # =========================
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=GROQ_API_KEY,
+selected_model = os.getenv("GOOGLE_MODEL", "gemini-3.6-flash")
+llm = ChatGoogleGenerativeAI(
+    model=selected_model,
+    temperature=0,
+    streaming=True,
+    api_key=GOOGLE_API_KEY,
 )
 
 # =========================
@@ -719,14 +723,10 @@ graph.add_edge("guardrail_blocked", END)
 # =========================
 # PostgreSQL Checkpointer - original persistence kept
 # =========================
-DATABASE_URL = get_database_url()
-_conn = psycopg.connect(
-    DATABASE_URL,
-    autocommit=True,
-    row_factory=dict_row,
-)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+# =========================
+# Memory Checkpointer
+# =========================
+checkpointer = PostgresSaver(ConnectionPool(conninfo=get_database_url(), max_size=20))\ncheckpointer.setup()
 
 travel_graph = graph.compile(checkpointer=checkpointer)
 

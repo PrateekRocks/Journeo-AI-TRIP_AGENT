@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend import run_travel_agent, resume_travel_agent
@@ -25,6 +26,14 @@ app = FastAPI(
         "Human-in-the-Loop, and FastAPI Frontend"
     ),
     version="2.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # For Next.js development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.mount(
@@ -154,7 +163,7 @@ async def favicon():
 if __name__ == "__main__":
     uvicorn.run(
         "app:app",
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=8000,
         reload=True,
     )
